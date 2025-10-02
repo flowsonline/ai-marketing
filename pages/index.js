@@ -82,7 +82,9 @@ export default function Home() {
         })
       });
       const json = await res.json();
-      const audioUrl = json.audio || json.url || json.dataUrl;
+
+      // 👇 accept all possible keys, including audioUrl
+      const audioUrl = json.audio || json.url || json.dataUrl || json.audioUrl;
 
       if (!audioUrl) {
         pushLog('No audio returned: ' + JSON.stringify(json));
@@ -94,7 +96,25 @@ export default function Home() {
         audioRef.current = new Audio();
       }
       audioRef.current.src = audioUrl;
-      await audioRef.current.play().catch(err => pushLog('Audio play blocked: ' + err?.message));
+
+      try {
+        await audioRef.current.play();
+      } catch (err) {
+        // handle autoplay restrictions gracefully
+        pushLog('Autoplay blocked — click to play ▶️');
+        const a = document.createElement('a');
+        a.href = audioUrl;
+        a.textContent = 'Play TTS';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        // append to the preformatted log
+        const pre = document.querySelector('pre');
+        if (pre) {
+          const div = document.createElement('div');
+          div.appendChild(a);
+          pre.appendChild(div);
+        }
+      }
     } catch (e) {
       pushLog('TTS error: ' + (e?.message || String(e)));
     } finally {
