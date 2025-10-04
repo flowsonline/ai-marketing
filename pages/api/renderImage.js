@@ -5,58 +5,47 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { headline = 'Hello from Flows Alpha' } = req.body || {};
+    const { buildImageTemplate } = await import('../../lib/templates.js');
 
     const host = process.env.SHOTSTACK_HOST || 'https://api.shotstack.io';
     const env  = process.env.SHOTSTACK_ENV || 'v1';
-    const apiKey = process.env.SHOTSTACK_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'SHOTSTACK_API_KEY missing' });
-    }
+    const key  = process.env.SHOTSTACK_API_KEY;
+    if (!key) return res.status(500).json({ error: 'SHOTSTACK_API_KEY missing' });
 
-    const url = `${host}/edit/${env}/render`;
+    const {
+      headline = 'Hello from Flows Alpha',
+      format = '1:1',
+      logoUrl = '',
+      paletteColor = '#111827',
+    } = req.body || {};
 
-    // Minimal still-image job (PNG) – simple title text
-    const edit = {
-      timeline: {
-        tracks: [
-          { clips: [
-            { asset: { type: 'title', text: String(headline).slice(0, 60) }, start: 0, length: 2 }
-          ] }
-        ]
-      },
-      output: { format: 'png', resolution: 'sd' }
-    };
-
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(edit)
+    const edit = buildImageTemplate({
+      headline: String(headline).slice(0, 80),
+      logoUrl,
+      paletteColor,
+      format
     });
 
-    const bodyText = await r.text();             // <-- always read text first
-    const maybeJson = safeParse(bodyText);
+    const url = `${host}/edit/${env}/render`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify(edit),
+    });
+
+    const text = await r.text(); // guard empty body
+    let json = {};
+    try { json = text ? JSON.parse(text) : {}; } catch {}
 
     if (!r.ok) {
       return res.status(r.status).json({
-        error: `Shotstack ${r.status} ${r.statusText}`,
-        url,
-        request: edit,
-        response: maybeJson
+        error: `Shotstack POST /edit/${env}/render failed: ${json?.message || r.statusText}`,
+        url, request: edit, response: json
       });
     }
 
-    // Shotstack queue responses include { id, message, response: { id } }
-    return res.status(200).json(maybeJson);
+    return res.status(200).json(json);
   } catch (e) {
-    console.error('renderImage error:', e);
     return res.status(500).json({ error: e.message || 'Unexpected error' });
   }
-}
-
-function safeParse(t) {
-  try { return JSON.parse(t); } catch { return t; }
 }
