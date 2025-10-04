@@ -2,9 +2,24 @@
 import { useRef, useState } from 'react';
 
 export default function Home() {
+  // ---- Step 0/1: inputs for /api/compose ----
+  const [brandName, setBrandName] = useState('');
+  const [website, setWebsite] = useState('');
+  const [description, setDescription] = useState('');
+
+  const [industry, setIndustry] = useState('');
+  const [goal, setGoal] = useState('awareness');
+  const [tone, setTone] = useState('friendly');
+  const [platform, setPlatform] = useState('instagram');
+  const [format, setFormat] = useState('1:1');     // Static 1:1, Reel 9:16, Story 9:16, Wide 16:9
+  const [includeVoiceover, setIncludeVoiceover] = useState(true);
+
+  // ---- Existing “quick test” controls ----
   const [headline, setHeadline] = useState('Hello from Flows Alpha');
   const [ttsScript, setTtsScript] = useState('Hi there from Flows Alpha!');
-  const [voice, setVoice] = useState('alloy');           // NEW: voice selector
+  const [voice, setVoice] = useState('alloy');
+
+  // ---- Status + log ----
   const [jobId, setJobId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState([]);
@@ -15,6 +30,50 @@ export default function Home() {
     setLog(l => [new Date().toLocaleTimeString() + ' — ' + line, ...l].slice(0, 120));
   }
 
+  // ---- NEW: call /api/compose ----
+  async function composeNow() {
+    if (busy) return;
+    if (!brandName.trim() || !description.trim()) {
+      pushLog('Please fill Brand and Description before composing.');
+      return;
+    }
+    setBusy(true);
+    try {
+      pushLog('Composing copy with /api/compose…');
+      const res = await fetch('/api/compose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName: brandName.trim(),
+          website: website.trim(),
+          description: description.trim(),
+          industry: industry.trim(),
+          goal,
+          tone,
+          platform,
+          format,
+          includeVoiceover
+        })
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        pushLog('Compose error: ' + (json?.error || res.statusText));
+        return;
+      }
+
+      // Hydrate the quick-test fields with the composed results
+      if (json.headline) setHeadline(json.headline);
+      if (json.script) setTtsScript(json.script);
+
+      pushLog('Compose OK. Headline & script updated.');
+    } catch (e) {
+      pushLog('Compose error: ' + (e?.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---- Existing: render sample via Shotstack template ----
   async function renderSample() {
     if (busy) return;
     const text = headline.trim();
@@ -65,6 +124,7 @@ export default function Home() {
     }
   }
 
+  // ---- Existing: TTS quick test ----
   async function ttsTest() {
     if (busy) return;
     const script = ttsScript.trim();
@@ -77,7 +137,7 @@ export default function Home() {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script, voice })       // NEW: pass selected voice
+        body: JSON.stringify({ script, voice })
       });
       const json = await res.json();
       const audioUrl = json.audio || json.url || json.dataUrl || json.audioUrl;
@@ -103,7 +163,106 @@ export default function Home() {
         <h1 style={styles.title}>Orion — Social Media MVP</h1>
         <p style={styles.p}>Quick actions to prove the backend is wired and working.</p>
 
-        {/* Inputs */}
+        {/* STEP 0/1: Compose */}
+        <div style={styles.sectionTitle}>Step 0/1 — Compose</div>
+        <div style={styles.inputs}>
+          <label style={styles.label}>
+            Brand / Product Name *
+            <input
+              style={styles.input}
+              value={brandName}
+              onChange={e => setBrandName(e.target.value)}
+              placeholder="Acme Outdoors"
+              maxLength={120}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Website
+            <input
+              style={styles.input}
+              value={website}
+              onChange={e => setWebsite(e.target.value)}
+              placeholder="https://example.com"
+            />
+          </label>
+
+          <label style={styles.label}>
+            Description / Motive *
+            <textarea
+              style={styles.textarea}
+              rows={3}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="What is this campaign about?"
+              maxLength={800}
+            />
+          </label>
+
+          {/* Few optional selectors to seed the LLM */}
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:10}}>
+            <label style={styles.label}>
+              Industry
+              <input style={styles.input} value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="outdoor gear" />
+            </label>
+
+            <label style={styles.label}>
+              Goal
+              <select style={styles.input} value={goal} onChange={e=>setGoal(e.target.value)}>
+                <option value="awareness">awareness</option>
+                <option value="engagement">engagement</option>
+                <option value="conversions">conversions</option>
+                <option value="lead-gen">lead-gen</option>
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Tone
+              <select style={styles.input} value={tone} onChange={e=>setTone(e.target.value)}>
+                <option value="friendly">friendly</option>
+                <option value="bold">bold</option>
+                <option value="professional">professional</option>
+                <option value="playful">playful</option>
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Platform
+              <select style={styles.input} value={platform} onChange={e=>setPlatform(e.target.value)}>
+                <option value="instagram">instagram</option>
+                <option value="tiktok">tiktok</option>
+                <option value="facebook">facebook</option>
+                <option value="youtube">youtube</option>
+                <option value="linkedin">linkedin</option>
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Format
+              <select style={styles.input} value={format} onChange={e=>setFormat(e.target.value)}>
+                <option value="1:1">Static 1:1</option>
+                <option value="9:16">Reel 9:16</option>
+                <option value="story">Story 9:16</option>
+                <option value="16:9">Wide 16:9</option>
+              </select>
+            </label>
+
+            <label style={styles.label}>
+              Include Voiceover?
+              <select style={styles.input} value={includeVoiceover ? 'yes' : 'no'} onChange={e=>setIncludeVoiceover(e.target.value==='yes')}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div style={styles.row}>
+          <button style={styles.btn} disabled={busy} onClick={composeNow}>✨ Compose</button>
+        </div>
+
+        {/* Quick-test Inputs (what you already had) */}
+        <div style={styles.sectionTitle}>Quick tests</div>
         <div style={styles.inputs}>
           <label style={styles.label}>
             Headline for video
@@ -128,7 +287,6 @@ export default function Home() {
             />
           </label>
 
-          {/* NEW: voice dropdown */}
           <label style={styles.label}>
             Voice
             <select
@@ -190,6 +348,7 @@ const styles = {
   title: { margin: '6px 0 16px', fontSize: 32, fontWeight: 800, letterSpacing: 0.5 },
   p: { margin: '0 0 18px', opacity: 0.9 },
 
+  sectionTitle: { margin: '12px 0 8px', fontSize: 14, opacity: 0.8, letterSpacing: 0.3 },
   inputs: { display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginBottom: 12 },
   label: { display: 'grid', gap: 6, fontSize: 12, opacity: 0.9 },
   input: {
