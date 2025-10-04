@@ -160,7 +160,7 @@ export default function Home() {
     return url || '';
   }
 
-  // ---------- STEP 3: Generate Image ----------
+  // ---------- STEP 3: Generate Image (SAFE PARSE) ----------
   async function renderImage() {
     if (busy) return;
     const text = (headline || '').trim();
@@ -178,9 +178,18 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ headline: text })
       });
-      const queued = await res.json();
+
+      // Read raw response text then attempt JSON, to avoid "Unexpected end of JSON input"
+      const raw = await res.text();
+      let queued;
+      try { queued = JSON.parse(raw); } catch { queued = { error: raw }; }
+
+      if (!res.ok || (!queued.id && !queued.response?.id)) {
+        pushLog('Image render error: ' + (queued?.error || JSON.stringify(queued)));
+        return;
+      }
+
       const id = queued.id || queued.response?.id;
-      if (!id) { pushLog('No job id returned (image): ' + JSON.stringify(queued)); return; }
       setJobId(id);
       pushLog('Image queued with id: ' + id);
 
