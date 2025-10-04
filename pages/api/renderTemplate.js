@@ -1,62 +1,129 @@
-// pages/api/renderTemplate.js
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+// lib/templates.js
 
-  try {
-    const headline = (req.body?.headline || 'Hello from Flows Alpha').toString().slice(0, 60);
+// ---------- IMAGE TEMPLATE ----------
+// Simple still frame with optional logo and a headline.
+// format: "1:1" | "9:16" | "16:9"  (default "1:1")
+// Output format is PNG (set by /renderImage serve destination).
+export function buildImageTemplate({
+  headline = 'Hello',
+  logoUrl = '',
+  paletteColor = '#111827', // slate-900
+  format = '1:1',
+} = {}) {
+  const aspect =
+    format === '9:16' ? '9:16' :
+    format === '16:9' ? '16:9' : '1:1';
 
-    // Hardcode the exact URL so we remove any risk of double "edit" or bad string replace
-    const url = 'https://api.shotstack.io/edit/v1/render';
+  // We let Shotstack scale; these are just for reference if needed.
+  const size =
+    aspect === '9:16'  ? { width: 1080, height: 1920 } :
+    aspect === '16:9'  ? { width: 1920, height: 1080 } :
+                         { width: 1080, height: 1080 };
 
-    // Minimal valid edit payload that Shotstack accepts right away
-    const edit = {
-      timeline: {
-        tracks: [
-          {
-            clips: [
-              {
-                asset: { type: 'title', text: headline },
-                start: 0,
-                length: 2
-              }
-            ]
-          }
-        ]
-      },
-      output: { format: 'mp4', resolution: 'hd' }
-    };
+  return {
+    timeline: {
+      background: paletteColor || '#111827',
+      tracks: [
+        {
+          clips: [
+            // Optional logo (top-left, fade in/out)
+            ...(logoUrl ? [{
+              asset: { type: 'image', src: logoUrl },
+              start: 0, length: 5, fit: 'contain', scale: 0.16,
+              position: 'topLeft', offset: { x: 0.06, y: -0.06 },
+              transition: { in: 'fade', out: 'fade' },
+            }] : []),
 
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Your production key must be set in Vercel as SHOTSTACK_API_KEY (you already have this)
-        'x-api-key': process.env.SHOTSTACK_API_KEY || ''
-      },
-      body: JSON.stringify(edit)
+            // Headline (center)
+            {
+              asset: {
+                type: 'title',
+                text: String(headline || '').slice(0, 80),
+                style: 'minimal',
+                size: 0.85,
+                color: '#ffffff',
+                background: null
+              },
+              start: 0, length: 5,
+              position: 'center',
+              transition: { in: 'fade', out: 'fade' },
+            },
+          ],
+        },
+      ],
+    },
+    output: {
+      format: 'png',
+      resolution: aspect === '9:16' ? 'mobile' :
+                  aspect === '16:9' ? 'hd' : 'sd',
+      aspectRatio: aspect,
+    },
+  };
+}
+
+// ---------- VIDEO TEMPLATE ----------
+// Builds a short video from a still image (and optional audio).
+// format: "1:1" | "9:16" | "16:9"
+export function buildVideoTemplate({
+  imageUrl,
+  headline = '',
+  audioUrl = '',
+  format = '1:1',
+} = {}) {
+  const aspect =
+    format === '9:16' ? '9:16' :
+    format === '16:9' ? '16:9' : '1:1';
+
+  const clips = [];
+
+  if (imageUrl) {
+    clips.push({
+      asset: { type: 'image', src: imageUrl },
+      start: 0,
+      length: 5,
+      fit: 'cover',
+      transition: { in: 'fade', out: 'fade' },
+      effect: 'zoomIn', // small parallax
     });
-
-    const text = await r.text(); // capture raw in case JSON parsing fails
-    let data;
-    try { data = JSON.parse(text); } catch { data = { raw: text }; }
-
-    if (!r.ok) {
-      // Surface everything so we can see *exactly* what Shotstack said
-      return res.status(r.status).json({
-        error: `Shotstack ${r.status} ${r.statusText}`,
-        url,
-        request: edit,
-        response: data
-      });
-    }
-
-    // Success path – Shotstack returns { success, message, response: { id } }
-    const id = data?.response?.id;
-    return res.status(200).json({ id, shotstack: data });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: e.message || 'Unexpected error' });
   }
+
+  // Optional small title overlay (bottom)
+  if (headline) {
+    clips.push({
+      asset: {
+        type: 'title',
+        text: String(headline).slice(0, 60),
+        style: 'minimal',
+        size: 0.65,
+        color: '#ffffff'
+      },
+      start: 0.3,
+      length: 4.4,
+      position: 'bottom',
+      transition: { in: 'fade', out: 'fade' },
+    });
+  }
+
+  const tracks = [{ clips }];
+
+  // Optional audio track
+  if (audioUrl) {
+    tracks.push({
+      clips: [{
+        asset: { type: 'audio', src: audioUrl },
+        start: 0, length: 5, volume: 1
+      }]
+    });
+  }
+
+  return {
+    timeline: { tracks },
+    output: {
+      format: 'mp4',
+      resolution: aspect === '9:16' ? 'mobile' :
+                  aspect === '16:9' ? 'hd' : 'sd',
+      aspectRatio: aspect,
+      fps: 25,
+    },
+  };
 }
