@@ -1,21 +1,23 @@
 // pages/api/renderVideo.js
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(200).json({ ok: true, hint: 'POST a JSON body to render a video.' });
   }
 
   try {
     const { buildVideoTemplate } = await import('../../lib/templates.js');
 
     const host = process.env.SHOTSTACK_HOST || 'https://api.shotstack.io';
-    const env  = process.env.SHOTSTACK_ENV || 'v1';
-    const key  = process.env.SHOTSTACK_API_KEY;
-    if (!key) return res.status(500).json({ error: 'Missing SHOTSTACK_API_KEY' });
+    const env = process.env.SHOTSTACK_ENV || 'v1';
+    const apiKey = process.env.SHOTSTACK_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'SHOTSTACK_API_KEY missing' });
 
+    // Inputs from wizard
     const {
       imageUrl,
       headline = '',
       audioUrl = '',
+      tone = 'friendly',
       format = '1:1',
     } = req.body || {};
 
@@ -23,28 +25,29 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'imageUrl required' });
     }
 
-    const payload = buildVideoTemplate({ imageUrl, headline, audioUrl, format });
+    const payload = buildVideoTemplate({ imageUrl, headline, audioUrl, tone, format });
 
     const url = `${host}/edit/${env}/render`;
     const r = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
       body: JSON.stringify(payload),
     });
 
-    const text = await r.text();
-    let json = {};
-    try { json = text ? JSON.parse(text) : {}; } catch {}
-
     if (!r.ok) {
+      const msg = await r.text();
       return res.status(r.status).json({
-        error: `Shotstack POST /edit/${env}/render failed: ${json?.message || r.statusText}`,
-        url, request: payload, response: json
+        error: `Shotstack POST /edit/${env}/render failed`,
+        message: msg || r.statusText,
       });
     }
 
+    const json = await r.json();
     return res.status(200).json(json);
-  } catch (e) {
-    return res.status(500).json({ error: e.message || 'Unexpected error' });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || String(err) });
   }
 }
