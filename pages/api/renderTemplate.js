@@ -7,14 +7,10 @@ export default async function handler(req, res) {
   try {
     const headline = (req.body?.headline || 'Hello from Flows Alpha').toString().slice(0, 60);
 
-    // 🟢 Use env vars so we can switch prod/stage from Vercel
-    const host = process.env.SHOTSTACK_HOST || 'https://api.shotstack.io';
-    const env  = process.env.SHOTSTACK_ENV  || 'v1'; // set to "stage" in Vercel
-    const key  = process.env.SHOTSTACK_API_KEY;
+    // Hardcode the exact URL so we remove any risk of double "edit" or bad string replace
+    const url = 'https://api.shotstack.io/edit/v1/render';
 
-    const url = `${host}/edit/${env}/render`;
-
-    // Minimal valid edit payload
+    // Minimal valid edit payload that Shotstack accepts right away
     const edit = {
       timeline: {
         tracks: [
@@ -29,34 +25,38 @@ export default async function handler(req, res) {
           }
         ]
       },
-      output: { format: 'mp4', resolution: 'sd' }
+      output: { format: 'mp4', resolution: 'hd' }
     };
 
     const r = await fetch(url, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
-        'x-api-key': key
+        'Content-Type': 'application/json',
+        // Your production key must be set in Vercel as SHOTSTACK_API_KEY (you already have this)
+        'x-api-key': process.env.SHOTSTACK_API_KEY || ''
       },
-      body: JSON.stringify({ timeline: edit.timeline, output: edit.output })
+      body: JSON.stringify(edit)
     });
 
-    const body = await r.json().catch(() => ({}));
+    const text = await r.text(); // capture raw in case JSON parsing fails
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!r.ok) {
-      // Helpful error echo
+      // Surface everything so we can see *exactly* what Shotstack said
       return res.status(r.status).json({
         error: `Shotstack ${r.status} ${r.statusText}`,
         url,
-        request: { timeline: edit.timeline, output: edit.output },
-        response: body
+        request: edit,
+        response: data
       });
     }
 
-    // Success returns { success:true, response:{ id, ... } } on stage/prod
-    return res.status(200).json(body);
+    // Success path – Shotstack returns { success, message, response: { id } }
+    const id = data?.response?.id;
+    return res.status(200).json({ id, shotstack: data });
   } catch (e) {
-    console.error('renderTemplate error:', e);
-    return res.status(500).json({ error: e?.message || 'Unexpected error' });
+    console.error(e);
+    return res.status(500).json({ error: e.message || 'Unexpected error' });
   }
 }
