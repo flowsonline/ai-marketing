@@ -31,6 +31,10 @@ export default function Home() {
   const [script, setScript] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
 
+  // Step 3/4 assets
+  const [imageUrl, setImageUrl] = useState(''); // result from /api/renderImage
+  const [videoUrl, setVideoUrl] = useState(''); // result from /api/renderVideo
+
   // Render status
   const [jobId, setJobId] = useState(null);
   const lastUrlRef = useRef(null);
@@ -95,6 +99,8 @@ export default function Home() {
       setHashtags(Array.isArray(json.hashtags) ? json.hashtags : []);
       setScript(json.script || '');
       setAudioUrl('');
+      setImageUrl('');
+      setVideoUrl('');
       pushLog('Compose done.');
       setStep(2);
     } catch (e) {
@@ -137,7 +143,107 @@ export default function Home() {
     }
   }
 
-  // Render with Shotstack using generated headline
+  // ---------- POLLING UTIL ----------
+  async function pollUntilDone(id) {
+    let last = null;
+    for (let i = 0; i < 50; i++) { // ~2.5 minutes max
+      await new Promise(s => setTimeout(s, 3000));
+      const sRes = await fetch('/api/status?id=' + id);
+      const sJson = await sRes.json();
+      last = sJson;
+      const st = sJson.status || sJson.response?.status || sJson.message;
+      pushLog('Status tick: ' + (st ?? JSON.stringify(sJson)));
+      if (['done', 'failed', 'cancelled'].includes(st)) break;
+    }
+
+    const url = last?.url || last?.response?.url || last?.output?.url || last?.response?.output?.url;
+    return url || '';
+  }
+
+  // ---------- STEP 3: Generate Image ----------
+  async function renderImage() {
+    if (busy) return;
+    const text = (headline || '').trim();
+    if (!text) { pushLog('Compose first — need a headline for the image.'); return; }
+
+    setBusy(true);
+    setJobId(null);
+    lastUrlRef.current = null;
+    setImageUrl('');
+    pushLog('Queuing image render…');
+
+    try {
+      const res = await fetch('/api/renderImage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headline: text })
+      });
+      const queued = await res.json();
+      const id = queued.id || queued.response?.id;
+      if (!id) { pushLog('No job id returned (image): ' + JSON.stringify(queued)); return; }
+      setJobId(id);
+      pushLog('Image queued with id: ' + id);
+
+      const url = await pollUntilDone(id);
+      if (url) {
+        setImageUrl(url);
+        lastUrlRef.current = url;
+        pushLog('Image ready: ' + url);
+      } else {
+        pushLog('Image finished (or timed out) with no URL.');
+      }
+    } catch (e) {
+      pushLog('Image render error: ' + (e?.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- STEP 4: Assemble Video ----------
+  async function renderVideoFromImage() {
+    if (busy) return;
+    if (!imageUrl) { pushLog('Generate an image first (Step 3).'); return; }
+
+    setBusy(true);
+    setJobId(null);
+    lastUrlRef.current = null;
+    setVideoUrl('');
+    pushLog('Queuing video render…');
+
+    try {
+      const res = await fetch('/api/renderVideo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          format,
+          headline: (headline || '').slice(0, 60),
+          imageUrl,
+          audioUrl: includeVoiceover ? audioUrl : ''
+        })
+      });
+      const queued = await res.json();
+      const id = queued.id || queued.response?.id;
+      if (!id) { pushLog('No job id returned (video): ' + JSON.stringify(queued)); return; }
+      setJobId(id);
+      pushLog('Video queued with id: ' + id);
+
+      const url = await pollUntilDone(id);
+      if (url) {
+        setVideoUrl(url);
+        lastUrlRef.current = url;
+        pushLog('Video ready: ' + url);
+        window.open(url, '_blank');
+      } else {
+        pushLog('Video finished (or timed out) with no URL.');
+      }
+    } catch (e) {
+      pushLog('Video render error: ' + (e?.message || String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Legacy sample (keep as sanity check) ----------
   async function renderSample() {
     if (busy) return;
     const text = (headline || '').trim();
@@ -160,26 +266,13 @@ export default function Home() {
       setJobId(id);
       pushLog('Queued with id: ' + id);
 
-      let last = null;
-      for (let i = 0; i < 40; i++) {
-        await new Promise(s => setTimeout(s, 3000));
-        const sRes = await fetch('/api/status?id=' + id);
-        const sJson = await sRes.json();
-        last = sJson;
-        const st = sJson.status || sJson.response?.status || sJson.message;
-        pushLog('Status tick: ' + (st ?? JSON.stringify(sJson)));
-        if (['done', 'failed', 'cancelled'].includes(st)) break;
-      }
-
-      const url =
-        last?.url || last?.response?.url || last?.output?.url || last?.response?.output?.url;
-
+      const url = await pollUntilDone(id);
       if (url) {
         lastUrlRef.current = url;
         pushLog('Opening result: ' + url);
         window.open(url, '_blank');
       } else {
-        pushLog('Finished (or timed out) with no URL. Last: ' + JSON.stringify(last));
+        pushLog('Finished (or timed out) with no URL.');
       }
     } catch (e) {
       pushLog('Render error: ' + (e?.message || String(e)));
@@ -192,7 +285,7 @@ export default function Home() {
     <main style={styles.wrap}>
       <div style={styles.card}>
         <h1 style={styles.title}>Orion — Social Media MVP</h1>
-        <p style={styles.p}>Brand → Compose → (Voiceover) → Render.</p>
+        <p style={styles.p}>Brand → Compose → (Voiceover) → <b>Image</b> → <b>Video</b> → Preview.</p>
 
         {/* Wizard stepper */}
         <div style={styles.steps}>
@@ -300,14 +393,33 @@ export default function Home() {
               <div><strong>Hashtags</strong>: {hashtags?.length ? hashtags.join(' ') : <em style={{opacity:.7}}>n/a</em>}</div>
               <div><strong>Script</strong>: {script || <em style={{opacity:.7}}>n/a</em>}</div>
               {audioUrl && <div><strong>Audio</strong>: <a style={styles.linkBtn} href={audioUrl} target="_blank" rel="noreferrer">Open audio</a></div>}
+              {imageUrl && <div><strong>Image</strong>: <a style={styles.linkBtn} href={imageUrl} target="_blank" rel="noreferrer">Open image</a></div>}
+              {videoUrl && <div><strong>Video</strong>: <a style={styles.linkBtn} href={videoUrl} target="_blank" rel="noreferrer">Open video</a></div>}
             </div>
 
             <div style={styles.row}>
               <button style={styles.btn} disabled={busy} onClick={()=>setStep(1)}>← Edit inputs</button>
+
               {includeVoiceover && (
                 <button style={styles.btn} disabled={busy} onClick={makeVoiceover}>🔊 Make voiceover</button>
               )}
+
+              {/* Step 3 */}
+              <button style={styles.btn} disabled={busy} onClick={renderImage}>🖼️ Generate image</button>
+
+              {/* Step 4 */}
+              <button
+                style={styles.btn}
+                disabled={busy || !imageUrl}
+                onClick={renderVideoFromImage}
+                title={!imageUrl ? 'Generate image first' : 'Assemble video'}
+              >
+                🎬 Assemble video
+              </button>
+
+              {/* Legacy sample */}
               <button style={styles.btn} disabled={busy} onClick={renderSample}>▶️ Render sample</button>
+
               {lastUrlRef.current && (
                 <a style={styles.linkBtn} href={lastUrlRef.current} target="_blank" rel="noreferrer">↗ Open last result</a>
               )}
