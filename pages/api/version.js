@@ -1,2 +1,11 @@
 // pages/api/version.js
-export default function handler(_req,res){ res.status(200).json({name:'orion-social-media-mvp',version:'1.0.0'}); }
+export default function handler(_req, res) {
+  res.status(200).json({
+    name: 'orion-social-media-mvp',
+    version: '1.0.0',
+    shotstack: {
+      host: process.env.SHOTSTACK_HOST,
+      env: process.env.SHOTSTACK_ENV
+    }
+  });
+}
